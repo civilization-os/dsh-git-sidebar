@@ -1,0 +1,60 @@
+{
+  "name": "@civilization/dsh-git-sidebar",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness Git sidebar and diff viewer for dsh-better-sidebar.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "watch": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
+    "prepack": "pnpm build"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/civilization-os/dsh-git-sidebar.git"
+  },
+  "bugs": {
+    "url": "https://github.com/civilization-os/dsh-git-sidebar/issues"
+  },
+  "homepage": "https://github.com/civilization-os/dsh-git-sidebar#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@types/react": "~18.3.1",
+    "dsh-better-sidebar": "0.18.0",
+    "react": "^18.2.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^5.6.3"
+  }
+}

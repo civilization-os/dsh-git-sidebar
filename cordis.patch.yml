@@ -1,0 +1,10 @@
+# dsh-git-sidebar bundle patch
+#
+# Merged automatically by profile boot when this package is listed in
+# `dsh.profile.bundles` (the `dsh plugin add` channel). For local development
+# you can alternatively append the same `insert` row to the profile's own
+# cordis.patch.yml — with `patchReload: live` it takes effect without a DSH
+# restart (browser hard-refresh still required for the client half).
+- insert:
+    - id: dsh-git-sidebar
+      name: "@civilization/dsh-git-sidebar"

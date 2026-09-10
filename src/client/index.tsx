@@ -1,10 +1,21 @@
 /** Browser entry for the Git sidebar and unified-diff viewer. */
 import type { Context } from '@deepseek-ai/cordis'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type {} from 'dsh-better-sidebar'
-import type { FileViewerProps, SessionScope, SidebarStore, TabComponentProps } from 'dsh-better-sidebar/client/service'
+export const inject = ['slots', 'sidebarRightTabs']
 
-export const inject = ['betterSidebar']
+export interface SessionScope {
+  sessionId?: string
+  cwd?: string
+  repoRoot?: string
+}
+
+export interface GitSidebarProps {
+  scope: SessionScope
+  store?: any
+  visible?: boolean
+  onOpenFile?: (path: string) => void
+  onOpenDiff?: (target: any) => void
+}
 
 const GIT_ID = 'dsh-git-sidebar:git'
 const DIFF_ID = 'dsh-git-sidebar:diff'
@@ -124,46 +135,71 @@ function IconCopy({ size = 12 }: { size?: number }) {
   )
 }
 
+const OFFICIAL_GIT_TAB_ID = '@civilization/dsh-git-sidebar'
+
+function GitGlyphIcon({ size = 20, className }: { size?: number; className?: string }) {
+  return (
+    <span className={className} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <IconBranch size={size} />
+    </span>
+  )
+}
+
+function OfficialGitTabTitle({ useTabInfo }: any): JSX.Element {
+  const info = useTabInfo ? useTabInfo() : null
+  const title = info?.tab?.title || 'Git'
+  return (
+    <>
+      <IconBranch size={15} />
+      <span>{title}</span>
+    </>
+  )
+}
+
+function OfficialGitTabBody(props: any): JSX.Element {
+  const { sessionId, useSessions } = props
+  const sessionCwd = useSessions ? useSessions((sessions: any) => sessions?.byId?.[sessionId]?.cwd) : undefined
+  const scope = useMemo<SessionScope>(() => ({
+    sessionId: sessionId || 'default',
+    cwd: sessionCwd,
+  }), [sessionId, sessionCwd])
+
+  return <GitSidebar scope={scope} visible={true} />
+}
+
 export function apply(ctx: Context): void {
-  const betterSidebar = ctx.betterSidebar
-  if (!betterSidebar) return
-  ctx.effect(() => betterSidebar.registerTab({
-    id: GIT_ID,
-    title: () => 'Git',
-    icon: <IconBranch size={16} />,
-    order: 60,
-    single: true,
-    settings: { pluginToggles: [
-      { key: 'pauseAutoRefresh', title: '暂停自动刷新', desc: '默认会在 Git 页签可见时刷新；开启后仅手动刷新。' },
-      { key: 'hideUntracked', title: '隐藏未跟踪文件', desc: '从更改列表中隐藏 Git 尚未跟踪的文件。' },
-      { key: 'refreshSeconds', type: 'number', min: 2, max: 60, unit: '秒', title: '刷新间隔' },
-      { key: 'historyLimit', type: 'number', min: 5, max: 100, title: '历史数量' },
-      { key: 'diffLayout', type: 'select', title: 'Diff 默认布局', options: [{ value: 'unified', title: '单栏（统一视图）' }, { value: 'split', title: '双栏（旧文件 / 新文件）' }] },
-      { key: 'openMode', type: 'select', title: '点击变更时', options: [{ value: 'preview', title: '先在 Git 内预览' }, { value: 'detached', title: '直接打开独立 Diff' }] },
-    ] },
-    component: GitSidebar,
-  }))
-  ctx.effect(() => betterSidebar.registerTab({
-    id: DIFF_TAB_ID,
-    title: () => 'Diff',
-    icon: <span aria-hidden style={{ fontWeight: 'bold' }}>±</span>,
-    hidden: true,
-    dedupeKey: tab => tab.id,
-    component: DetachedDiff,
-  }))
-  ctx.effect(() => betterSidebar.registerFileViewer({
-    id: DIFF_ID,
-    title: () => 'Diff',
-    icon: <span aria-hidden style={{ fontWeight: 'bold' }}>±</span>,
-    exts: ['diff', 'patch'],
-    fetchStrategy: 'fsRead',
-    settings: { pluginToggles: [{ key: 'wrapLines', title: '自动换行', desc: '阅读较长的 Diff 行时自动折行。' }] },
-    component: DiffViewer,
-  }))
+  const sidebarRightTabs = (ctx as any).sidebarRightTabs
+  const slots = (ctx as any).slots
+
+  // DSH 0.1.5-rc.2 官方右侧栏原生注册
+  if (sidebarRightTabs && slots) {
+    ctx.effect(() => sidebarRightTabs.register({
+      id: OFFICIAL_GIT_TAB_ID,
+      kind: 'git',
+      priority: 'extension',
+      title: () => 'Git',
+      guide: [{
+        order: 20,
+        title: () => 'Git',
+        description: () => '查看 Git 状态、暂存变更与提交历史',
+        icon: GitGlyphIcon,
+      }],
+    }), 'dsh-git-sidebar: official tab definition')
+
+    ctx.effect(() => slots.inject('sidebar.right.pane.tab', () => slots.register({
+      name: 'sidebar.right.pane.tab',
+      key: OFFICIAL_GIT_TAB_ID,
+    }, OfficialGitTabBody)), 'dsh-git-sidebar: official tab body')
+
+    ctx.effect(() => slots.inject('sidebar.right.pane.tab.title', () => slots.register({
+      name: 'sidebar.right.pane.tab.title',
+      key: OFFICIAL_GIT_TAB_ID,
+    }, OfficialGitTabTitle)), 'dsh-git-sidebar: official tab title')
+  }
 }
 
 /* ── Main Git Sidebar Component ── */
-function GitSidebar({ scope, store, visible, onOpenFile, onOpenDiff }: TabComponentProps): JSX.Element {
+function GitSidebar({ scope, store, visible = true, onOpenFile, onOpenDiff }: GitSidebarProps): JSX.Element {
   const prefs = usePluginSettings(store, GIT_ID)
   const autoRefresh = !boolSetting(prefs.pauseAutoRefresh, false)
   const showUntracked = !boolSetting(prefs.hideUntracked, false)
@@ -852,7 +888,7 @@ function DiffPane({
 }
 
 /* ── Full Diff Viewer for .diff / .patch Files ── */
-function DiffViewer({ content, path, store }: FileViewerProps): JSX.Element {
+function DiffViewer({ content, path, store }: { content?: string; path: string; store?: any }): JSX.Element {
   const settings = usePluginSettings(store, DIFF_ID)
   const [layout, setLayout] = useState<DiffLayout>('unified')
 
@@ -878,7 +914,7 @@ function DiffViewer({ content, path, store }: FileViewerProps): JSX.Element {
 }
 
 /* ── Detached Diff Tab in Main Workbench ── */
-function DetachedDiff({ scope, tab, store }: TabComponentProps): JSX.Element {
+function DetachedDiff({ scope, tab, store }: { scope: SessionScope; tab: any; store?: any }): JSX.Element {
   const prefs = usePluginSettings(store, GIT_ID)
   const meta = tab.meta as DetachedDiffMeta | undefined
   const [layout, setLayout] = useState<DiffLayout>(prefs.diffLayout === 'split' ? 'split' : 'unified')
@@ -1319,11 +1355,11 @@ function ConfirmModal(props: {
   )
 }
 
-/* ── Hook: Read settings safely from SidebarStore ── */
-function usePluginSettings(store: SidebarStore, id: string): Record<string, unknown> {
+/* ── Hook: Read settings safely from SidebarStore (optional) ── */
+function usePluginSettings(store: any, id: string): Record<string, unknown> {
   return useSyncExternalStore(
-    useCallback(listener => store.subscribe(listener), [store]),
-    useCallback(() => store.getSnapshot().prefs.pluginSettings[id] ?? EMPTY_SETTINGS, [store, id]),
+    useCallback(listener => (store?.subscribe ? store.subscribe(listener) : () => {}), [store]),
+    useCallback(() => (store?.getSnapshot ? store.getSnapshot()?.prefs?.pluginSettings?.[id] ?? EMPTY_SETTINGS : EMPTY_SETTINGS), [store, id]),
   )
 }
 
@@ -1333,21 +1369,38 @@ async function call<T = { ok: true }>(
   scope: SessionScope,
   extra: Record<string, unknown> = {},
 ): Promise<T> {
-  const response = await fetch(`/sidebar/api/${method}`, {
+  const payload = {
+    sessionId: scope.sessionId,
+    ...(scope.cwd ? { cwd: scope.cwd } : {}),
+    ...(scope.repoRoot ? { repoRoot: scope.repoRoot } : {}),
+    ...extra,
+  }
+
+  // 优先请求本插件 Host 独立端点 /dsh-git/api/，失败自动回退 /sidebar/api/
+  let response: Response | null = await fetch(`/dsh-git/api/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      sessionId: scope.sessionId,
-      ...(scope.cwd ? { cwd: scope.cwd } : {}),
-      ...(scope.repoRoot ? { repoRoot: scope.repoRoot } : {}),
-      ...extra,
-    }),
-  })
+    body: JSON.stringify(payload),
+  }).catch(() => null)
+
+  if (!response || !response.ok) {
+    response = await fetch(`/sidebar/api/${method}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => null)
+  }
+
+  if (!response) {
+    throw new Error('网络请求失败：无法连接到 Git 后端服务')
+  }
+
   const envelope = (await response.json().catch(() => null)) as {
     ok?: boolean
     value?: T
     error?: { message?: string }
   } | null
+
   if (!response.ok || envelope?.ok !== true || envelope.value === undefined) {
     throw new Error(envelope?.error?.message ?? `HTTP ${response.status}`)
   }

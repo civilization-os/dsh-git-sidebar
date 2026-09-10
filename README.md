@@ -1,6 +1,6 @@
 # dsh-git-sidebar
 
-DeepSeek Harness 的 Git 侧边栏与 Diff 查看插件，基于 `dsh-better-sidebar` 的公开扩展服务。
+DeepSeek Harness 的原生 Git 侧边栏与 Diff 查看插件，直接嵌入 DSH 官方右侧栏（`sidebarRightTabs`）体系。
 
 ## 安装
 
@@ -8,29 +8,20 @@ DeepSeek Harness 的 Git 侧边栏与 Diff 查看插件，基于 `dsh-better-sid
 dsh plugin --profile web add @civilization/dsh-git-sidebar --registry=https://registry.npmjs.org/
 ```
 
-## 产品范围
+## 产品特性
 
 Git 与 Diff 放在同一个插件中：Git 面板负责仓库导航，Diff 视图负责阅读选中的变更，两者共享当前会话的工作目录与仓库上下文。
 
 当前功能：
 
-- 显示当前仓库、分支及工作区状态。
-- 按“暂存 / 未暂存 / 未跟踪”分组展示变更文件。
-- 点击变更文件打开 Diff；支持单栏统一视图和旧/新文件双栏视图，未跟踪文本文件按完整新增展示。
-- 展示提交历史，点击提交查看提交 Diff。
-- 支持刷新、暂存、取消暂存与丢弃单文件更改；破坏性操作必须使用 Harness 统一确认对话框。
-- 使用 Harness 设计变量和现有组件，避免浏览器原生 `alert` / `confirm`。
-
-## 当前状态
-
-- 已注册 Git 侧边栏与 `.diff` / `.patch` 文件查看器。
-- 支持刷新、暂存、取消暂存、提交和带自定义确认弹窗的单文件丢弃。
-- Git 内提供快速 Diff 预览，也能将 Diff 拉出为独立工作台标签；独立标签可继续使用侧边栏自带的拖拽、停靠和浮窗操作。
-- Git 功能设置包含自动刷新、刷新间隔、未跟踪文件、历史数量、默认 Diff 布局和打开位置；Diff 文件预览设置包含长行自动换行。
-
-## Host 集成
-
-插件复用 `dsh-better-sidebar` 0.18.0 的 `/sidebar/api/git.*` 路由。仓库发现、工作区边界、会话归属和 Git 目标校验都由 Host 处理，插件不自行启动 Git 进程。
+- 原生接入 DSH 0.1.5+ 官方右侧栏（Guide 导航页与标签页系统），完全独立自主，无需任何第三方插件。
+- 100% 遵循 DSH 官方 `--dsw-alias-*` 语义化设计系统，极致适配浅色/深色/透明壁纸皮肤。
+- 显示当前仓库、分支及工作区状态，支持一键切换分支。
+- 按“暂存的更改 / 更改”清晰分组，支持一键全部暂存、全部取消暂存与丢弃确认。
+- 超大 Commit 安全熔断与多文件手风琴折叠，拒绝浏览器假死。
+- 专业连续时间轴 Git 提交树（Timeline Tree Rail），带节点发光、一键复制 Commit SHA 与增量分页加载。
+- 单栏统一视图（Unified）与双栏对比视图（Split）即时切换。
+- 内置独立 Host 端 Git RPC 引擎，直接执行系统 Git 指令，无需依赖其它中间件。
 
 ## 技术约束
 

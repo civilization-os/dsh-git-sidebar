@@ -1,7 +1,7 @@
 {
   "name": "@civilization/dsh-git-sidebar",
-  "version": "0.1.1",
-  "description": "DeepSeek Harness Git sidebar and diff viewer for dsh-better-sidebar.",
+  "version": "0.2.0",
+  "description": "DeepSeek Harness Git sidebar and diff viewer for official DSH right sidebar.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -51,8 +51,8 @@
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
+    "@types/node": "^22.20.2",
     "@types/react": "~18.3.1",
-    "dsh-better-sidebar": "0.18.0",
     "react": "^18.2.0",
     "tsdown": "^0.22.2",
     "typescript": "^5.6.3"

@@ -1,17 +1,121 @@
 /**
- * dsh-git-sidebar — host half (Node).
+ * @civilization/dsh-git-sidebar — Host plugin (Node.js).
  *
- * This scaffold is a *pure client* consumer of the `ctx.betterSidebar`
- * service provided by dsh-better-sidebar, so the Node half is intentionally
- * empty. The entry must still exist: profile boot mounts the package and the
- * client half (exports["./client"]) is only served for mounted entries.
- *
- * If your plugin needs host-side capability (routes, WebSockets, tools,
- * settings schema …) implement it here — dsh-better-sidebar itself is the
- * reference (src/index.ts of the DSH-better-sidebar repo).
+ * Implements self-contained Git RPC endpoints under `/dsh-git/api` and `/sidebar/api`.
+ * Completely independent of dsh-better-sidebar.
  */
-export const name = 'dsh-git-sidebar'
+import type { Context } from '@deepseek-ai/cordis'
+import * as git from './git.js'
 
-export function apply(): void {
-  // Host Git routes are implemented in the next milestone.
+export const name = '@civilization/dsh-git-sidebar'
+export const inject = ['webServer']
+
+async function readJsonBody(req: any): Promise<Record<string, any>> {
+  return new Promise((resolve, reject) => {
+    let raw = ''
+    req.on('data', (chunk: Buffer) => { raw += chunk.toString('utf8') })
+    req.on('end', () => {
+      try {
+        resolve(raw ? JSON.parse(raw) : {})
+      } catch (err) {
+        reject(err)
+      }
+    })
+    req.on('error', reject)
+  })
+}
+
+function writeJson(res: any, status: number, body: any): void {
+  const data = JSON.stringify(body)
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(data),
+  })
+  res.end(data)
+}
+
+function targetCwd(payload: Record<string, any>): string {
+  return payload.repoRoot || payload.cwd || process.cwd()
+}
+
+const GIT_METHODS: Record<string, (payload: Record<string, any>) => Promise<any>> = {
+  'git.status': async (payload) => {
+    return git.status(targetCwd(payload), payload.repoRoot)
+  },
+  'git.diff': async (payload) => {
+    const d = await git.diff(targetCwd(payload), payload.path, payload.staged === true, payload.repoRoot)
+    return { diff: d }
+  },
+  'git.stage': async (payload) => {
+    await git.stage(targetCwd(payload), payload.path, payload.repoRoot)
+    return { ok: true }
+  },
+  'git.unstage': async (payload) => {
+    await git.unstage(targetCwd(payload), payload.path, payload.repoRoot)
+    return { ok: true }
+  },
+  'git.commit': async (payload) => {
+    await git.commit(targetCwd(payload), String(payload.message || ''), payload.repoRoot)
+    return { ok: true }
+  },
+  'git.branch': async (payload) => {
+    return git.branches(targetCwd(payload), payload.repoRoot)
+  },
+  'git.checkout': async (payload) => {
+    await git.checkout(targetCwd(payload), String(payload.branch || ''), payload.repoRoot)
+    return { ok: true }
+  },
+  'git.log': async (payload) => {
+    const count = typeof payload.count === 'number' ? payload.count : 30
+    const skip = typeof payload.skip === 'number' ? payload.skip : 0
+    return git.log(targetCwd(payload), count, skip, payload.repoRoot)
+  },
+  'git.commit-diff': async (payload) => {
+    const d = await git.commitDiff(targetCwd(payload), String(payload.hash || ''), payload.repoRoot)
+    return { diff: d }
+  },
+  'git.discard': async (payload) => {
+    await git.discard(targetCwd(payload), String(payload.path || ''), payload.repoRoot)
+    return { ok: true }
+  },
+}
+
+export function apply(ctx: Context): void {
+  const webServer = (ctx as any).webServer
+  if (!webServer) return
+
+  const handleRpc = async (req: any, res: any, prefix: string) => {
+    if (req.method !== 'POST') {
+      writeJson(res, 405, { ok: false, error: { message: 'Method Not Allowed' } })
+      return
+    }
+    const pathname = new URL(req.url ?? '/', 'http://dsh.internal').pathname
+    const method = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : undefined
+    if (!method || !GIT_METHODS[method]) {
+      writeJson(res, 404, { ok: false, error: { message: `Unknown Git method: ${method}` } })
+      return
+    }
+
+    try {
+      const payload = await readJsonBody(req)
+      const result = await GIT_METHODS[method](payload)
+      writeJson(res, 200, { ok: true, value: result })
+    } catch (err: any) {
+      writeJson(res, 500, { ok: false, error: { message: err?.message || String(err) } })
+    }
+  }
+
+  // Register prefix route for /dsh-git/api/
+  ctx.effect(() => webServer.register({
+    kind: 'prefix',
+    path: '/dsh-git/api',
+    handler: (req: any, res: any) => handleRpc(req, res, '/dsh-git/api/'),
+  }), 'dsh-git-sidebar: /dsh-git/api routes')
+
+  // Register prefix fallback for /sidebar/api/
+  ctx.effect(() => webServer.register({
+    kind: 'prefix',
+    path: '/sidebar/api',
+    handler: (req: any, res: any) => handleRpc(req, res, '/sidebar/api/'),
+  }), 'dsh-git-sidebar: /sidebar/api fallback routes')
 }

@@ -13,7 +13,7 @@
  */
 import type { UserConfig } from 'tsdown'
 
-const PLUGIN_ID = 'dsh-git-sidebar'
+const PLUGIN_ID = '@civilization/dsh-git-sidebar'
 
 /** Modules the DSH browser shell already provides (frozen platform seed table). */
 const PLATFORM_MODULES = [

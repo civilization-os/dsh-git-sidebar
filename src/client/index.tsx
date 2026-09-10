@@ -136,6 +136,8 @@ function IconCopy({ size = 12 }: { size?: number }) {
 }
 
 const OFFICIAL_GIT_TAB_ID = '@civilization/dsh-git-sidebar'
+const OFFICIAL_DIFF_TAB_ID = '@civilization/dsh-git-sidebar:diff'
+const GIT_DIFF_SCHEME = 'dsh-resource://git-diff/'
 
 function GitGlyphIcon({ size = 20, className }: { size?: number; className?: string }) {
   return (
@@ -157,14 +159,120 @@ function OfficialGitTabTitle({ useTabInfo }: any): JSX.Element {
 }
 
 function OfficialGitTabBody(props: any): JSX.Element {
-  const { sessionId, useSessions } = props
+  const { sessionId, useSessions, useTabInfo } = props
+  const tabInfo = useTabInfo ? useTabInfo() : null
+  const tabActions = tabInfo?.tab?.actions
+
   const sessionCwd = useSessions ? useSessions((sessions: any) => sessions?.byId?.[sessionId]?.cwd) : undefined
   const scope = useMemo<SessionScope>(() => ({
     sessionId: sessionId || 'default',
     cwd: sessionCwd,
   }), [sessionId, sessionCwd])
 
-  return <GitSidebar scope={scope} visible={true} />
+  // 在官方右侧栏打开专属独立 Diff 标签页
+  const handleOpenDiff = useCallback((target: DiffTarget) => {
+    if (tabActions?.openResource) {
+      const title = targetTitle(target)
+      const uri = `${GIT_DIFF_SCHEME}${encodeURIComponent(title)}?target=${encodeURIComponent(JSON.stringify(target))}`
+      tabActions.openResource(uri)
+    }
+  }, [tabActions])
+
+  // 在官方编辑器/文件预览中打开文件
+  const handleOpenFile = useCallback((filePath: string) => {
+    if (tabActions?.openResource && sessionId) {
+      const normalized = filePath.replace(/\\/g, '/').replace(/^\.?\//, '')
+      tabActions.openResource(`dsh-resource://file/session/${encodeURIComponent(sessionId)}/${encodeURIComponent(normalized)}`)
+    }
+  }, [tabActions, sessionId])
+
+  return (
+    <GitSidebar
+      scope={scope}
+      visible={true}
+      onOpenDiff={handleOpenDiff}
+      onOpenFile={handleOpenFile}
+    />
+  )
+}
+
+function OfficialGitDiffTabTitle({ useTabInfo }: any): JSX.Element {
+  const info = useTabInfo ? useTabInfo() : null
+  const title = info?.tab?.title || 'Diff'
+  return (
+    <>
+      <span style={{ fontWeight: 'bold', fontSize: 13, marginRight: 5, opacity: 0.85 }}>±</span>
+      <span>{title}</span>
+    </>
+  )
+}
+
+function OfficialGitDiffTabBody(props: any): JSX.Element {
+  const { useTabInfo, sessionId, useSessions } = props
+  const tabInfo = useTabInfo ? useTabInfo() : null
+  const address = tabInfo?.tab?.navigation?.address || ''
+  const sessionCwd = useSessions ? useSessions((sessions: any) => sessions?.byId?.[sessionId]?.cwd) : undefined
+
+  const target = useMemo<DiffTarget | null>(() => {
+    try {
+      const qIdx = address.indexOf('?target=')
+      if (qIdx === -1) return null
+      const raw = address.slice(qIdx + 8)
+      return JSON.parse(decodeURIComponent(raw))
+    } catch {
+      return null
+    }
+  }, [address])
+
+  const [diff, setDiff] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [layout, setLayout] = useState<DiffLayout>('unified')
+
+  const repoScope: SessionScope = useMemo(() => ({
+    sessionId: sessionId || 'default',
+    cwd: sessionCwd,
+  }), [sessionId, sessionCwd])
+
+  useEffect(() => {
+    if (!target) return
+    setLoading(true)
+    setError(null)
+    void loadTargetDiff(target, repoScope, sessionCwd)
+      .then(setDiff)
+      .catch(err => {
+        setError(messageOf(err))
+        setDiff(null)
+      })
+      .finally(() => setLoading(false))
+  }, [target, repoScope, sessionCwd])
+
+  const title = target ? targetTitle(target) : 'Diff'
+
+  return (
+    <div className="dsh-git-root">
+      <GlobalDshStyle />
+      <header className="dsh-git-header">
+        <div className="dsh-git-header-info">
+          <div className="dsh-git-branch-row">
+            <span style={{ fontWeight: 'bold', fontSize: 13, color: 'var(--dsw-alias-brand-primary)' }}>±</span>
+            <span className="dsh-git-branch-name">{title}</span>
+          </div>
+          <div className="dsh-git-repo-path">{sessionCwd || ''}</div>
+        </div>
+        <LayoutSwitch value={layout} onChange={setLayout} />
+      </header>
+      {loading ? (
+        <Centered label="Loading..." />
+      ) : error ? (
+        <div className="dsh-git-banner-error">{error}</div>
+      ) : !diff ? (
+        <Empty title="没有差异变更" detail="目标文件与对应版本一致。" />
+      ) : (
+        <DiffContent content={diff} layout={layout} wrap={layout === 'split'} />
+      )}
+    </div>
+  )
 }
 
 export function apply(ctx: Context): void {
@@ -173,6 +281,7 @@ export function apply(ctx: Context): void {
 
   // DSH 0.1.5-rc.2 官方右侧栏原生注册
   if (sidebarRightTabs && slots) {
+    // 1. 注册 Git 主面板
     ctx.effect(() => sidebarRightTabs.register({
       id: OFFICIAL_GIT_TAB_ID,
       kind: 'git',
@@ -195,6 +304,32 @@ export function apply(ctx: Context): void {
       name: 'sidebar.right.pane.tab.title',
       key: OFFICIAL_GIT_TAB_ID,
     }, OfficialGitTabTitle)), 'dsh-git-sidebar: official tab title')
+
+    // 2. 注册 Git 独立 Diff 标签页 (识别 dsh-resource://git-diff/** 地址)
+    ctx.effect(() => sidebarRightTabs.register({
+      id: OFFICIAL_DIFF_TAB_ID,
+      kind: 'git-diff',
+      patterns: ['dsh-resource://git-diff/**'],
+      priority: 'extension',
+      title: (address: string) => {
+        try {
+          const pathPart = address.replace(GIT_DIFF_SCHEME, '').split('?')[0]
+          return pathPart ? decodeURIComponent(pathPart) : 'Diff'
+        } catch {
+          return 'Diff'
+        }
+      },
+    }), 'dsh-git-sidebar: official diff tab definition')
+
+    ctx.effect(() => slots.inject('sidebar.right.pane.tab', () => slots.register({
+      name: 'sidebar.right.pane.tab',
+      key: OFFICIAL_DIFF_TAB_ID,
+    }, OfficialGitDiffTabBody)), 'dsh-git-sidebar: official diff tab body')
+
+    ctx.effect(() => slots.inject('sidebar.right.pane.tab.title', () => slots.register({
+      name: 'sidebar.right.pane.tab.title',
+      key: OFFICIAL_DIFF_TAB_ID,
+    }, OfficialGitDiffTabTitle)), 'dsh-git-sidebar: official diff tab title')
   }
 }
 
@@ -288,14 +423,8 @@ function GitSidebar({ scope, store, visible = true, onOpenFile, onOpenDiff }: Gi
 
   const detach = useCallback((target: DiffTarget) => {
     if (!onOpenDiff) return
-    const title = targetTitle(target)
-    onOpenDiff({
-      id: detachedId(target, status?.root),
-      type: DIFF_TAB_ID,
-      title,
-      meta: { target, repoRoot: status?.root } satisfies DetachedDiffMeta,
-    })
-  }, [onOpenDiff, status?.root])
+    onOpenDiff(target)
+  }, [onOpenDiff])
 
   const openDiff = useCallback(async (target: DiffTarget) => {
     if (openMode === 'detached' && onOpenDiff) {

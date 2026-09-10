@@ -1,6 +1,6 @@
 {
   "name": "@civilization/dsh-git-sidebar",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DeepSeek Harness Git sidebar and diff viewer for official DSH right sidebar.",
   "type": "module",
   "main": "lib/index.js",

@@ -32,12 +32,16 @@ export interface GitLogEntry {
 }
 
 export class GitCommandError extends Error {
+  readonly code: string
+  readonly command: string
   constructor(
     message: string,
-    readonly code = 'git-error',
-    readonly command: string = '',
+    code = 'git-error',
+    command = '',
   ) {
     super(message)
+    this.code = code
+    this.command = command
   }
 }
 
@@ -77,22 +81,25 @@ export function parseLogLines(output: string): GitLogEntry[] {
   return rows
 }
 
-function runGit(cwd: string, args: string[], timeoutMs = 30_000): Promise<string> {
+function runGit(cwd: string, args: string[], timeoutMs = 30_000, input?: string): Promise<string> {
   const full = ['-C', cwd, '--no-pager', '-c', 'color.ui=false', ...args]
   return new Promise<string>((resolvePromise, reject) => {
     const child = spawn('git', full, {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     })
+    if (input !== undefined && child.stdin) {
+      child.stdin.end(input, 'utf8')
+    }
     let stdout = ''
     let stderr = ''
     const timer = setTimeout(() => {
       child.kill('SIGKILL')
       reject(new GitCommandError(`git ${args[0] ?? ''} timed out after ${timeoutMs}ms`, 'git-error', args.join(' ')))
     }, timeoutMs)
-    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
-    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
+    child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
+    child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
     child.on('error', (error: Error) => {
       clearTimeout(timer)
       reject(new GitCommandError(`cannot run git: ${error.message}`, 'git-error', args.join(' ')))
@@ -240,5 +247,128 @@ export async function commitDiff(cwd: string, hash: string, selected?: string): 
 
 export async function discard(cwd: string, path: string, selected?: string): Promise<void> {
   const root = await repoRoot(cwd, selected)
-  await runGit(root, ['checkout', '--', path])
+  // 检查目标文件的 git 状态
+  const rawStatus = await runGit(root, ['status', '--porcelain=v1', '-z', '--', path]).catch(() => '')
+  const parsed = parsePorcelainZ(rawStatus)
+  const isUntracked = parsed.some(e => e.xy === '??' || e.xy.trim() === '?')
+  const isStagedNew = parsed.some(e => e.xy[0] === 'A')
+
+  if (isUntracked) {
+    await runGit(root, ['clean', '-f', '-d', '--', path])
+  } else if (isStagedNew) {
+    await runGit(root, ['reset', '-q', '--', path]).catch(() => {})
+    await runGit(root, ['clean', '-f', '-d', '--', path]).catch(() => {})
+  } else {
+    await runGit(root, ['checkout', '--', path])
+  }
 }
+
+export interface GitSyncStatus {
+  hasRemote: boolean
+  upstream?: string
+  ahead: number
+  behind: number
+}
+
+export async function syncStatus(cwd: string, selected?: string): Promise<GitSyncStatus> {
+  const root = await repoRoot(cwd, selected)
+  const remotesRaw = await runGit(root, ['remote']).catch(() => '')
+  const hasRemote = remotesRaw.trim().length > 0
+
+  let upstream: string | undefined
+  try {
+    const up = await runGit(root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'])
+    upstream = up.trim() || undefined
+  } catch {
+    upstream = undefined
+  }
+
+  let ahead = 0
+  let behind = 0
+  if (upstream) {
+    try {
+      const counts = await runGit(root, ['rev-list', '--left-right', '--count', `HEAD...${upstream}`])
+      const [left, right] = counts.trim().split(/\s+/)
+      ahead = Number.parseInt(left ?? '0', 10) || 0
+      behind = Number.parseInt(right ?? '0', 10) || 0
+    } catch {}
+  }
+
+  return { hasRemote, upstream, ahead, behind }
+}
+
+export async function fetch(cwd: string, selected?: string): Promise<void> {
+  const root = await repoRoot(cwd, selected)
+  await runGit(root, ['fetch'], 60_000)
+}
+
+export async function pull(cwd: string, selected?: string): Promise<void> {
+  const root = await repoRoot(cwd, selected)
+  await runGit(root, ['pull'], 60_000)
+}
+
+export async function push(cwd: string, selected?: string): Promise<void> {
+  const root = await repoRoot(cwd, selected)
+  const branch = await currentBranch(root)
+  const status = await syncStatus(cwd, selected)
+  if (!status.upstream && status.hasRemote) {
+    await runGit(root, ['push', '-u', 'origin', branch], 60_000)
+  } else {
+    await runGit(root, ['push'], 60_000)
+  }
+}
+
+export async function createBranch(cwd: string, branch: string, selected?: string): Promise<void> {
+  const root = await repoRoot(cwd, selected)
+  const name = branch.trim()
+  if (!name) throw new Error('Branch name cannot be empty')
+  await runGit(root, ['checkout', '-b', name])
+}
+
+export interface GitStashEntry {
+  index: number
+  message: string
+  date: string
+}
+
+export async function stash(cwd: string, message?: string, selected?: string): Promise<void> {
+  const root = await repoRoot(cwd, selected)
+  const args = ['stash', 'push', '--include-untracked']
+  if (message?.trim()) {
+    args.push('-m', message.trim())
+  }
+  await runGit(root, args)
+}
+
+export async function stashPop(cwd: string, index?: number, selected?: string): Promise<void> {
+  const root = await repoRoot(cwd, selected)
+  const target = index !== undefined ? `stash@{${index}}` : 'stash@{0}'
+  await runGit(root, ['stash', 'pop', target])
+}
+
+export async function stashList(cwd: string, selected?: string): Promise<GitStashEntry[]> {
+  const root = await repoRoot(cwd, selected)
+  const raw = await runGit(root, ['stash', 'list', '--format=%gd%x1f%gs%x1f%ci']).catch(() => '')
+  const rows: GitStashEntry[] = []
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue
+    const [gd, gs, ci] = line.split('\x1f')
+    const match = gd?.match(/stash@\{(\d+)\}/)
+    const index = match ? Number.parseInt(match[1]!, 10) : rows.length
+    rows.push({
+      index,
+      message: gs ?? '',
+      date: ci ?? '',
+    })
+  }
+  return rows
+}
+
+export async function applyPatch(cwd: string, patch: string, reverse = false, selected?: string): Promise<void> {
+  const root = await repoRoot(cwd, selected)
+  const args = ['apply', '--cached', '--unidiff-zero']
+  if (reverse) args.push('--reverse')
+  args.push('-')
+  await runGit(root, args, 15_000, patch)
+}
+

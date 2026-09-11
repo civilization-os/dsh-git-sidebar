@@ -78,6 +78,40 @@ const GIT_METHODS: Record<string, (payload: Record<string, any>) => Promise<any>
     await git.discard(targetCwd(payload), String(payload.path || ''), payload.repoRoot)
     return { ok: true }
   },
+  'git.sync-status': async (payload) => {
+    return git.syncStatus(targetCwd(payload), payload.repoRoot)
+  },
+  'git.fetch': async (payload) => {
+    await git.fetch(targetCwd(payload), payload.repoRoot)
+    return { ok: true }
+  },
+  'git.pull': async (payload) => {
+    await git.pull(targetCwd(payload), payload.repoRoot)
+    return { ok: true }
+  },
+  'git.push': async (payload) => {
+    await git.push(targetCwd(payload), payload.repoRoot)
+    return { ok: true }
+  },
+  'git.create-branch': async (payload) => {
+    await git.createBranch(targetCwd(payload), String(payload.branch || ''), payload.repoRoot)
+    return { ok: true }
+  },
+  'git.stash': async (payload) => {
+    await git.stash(targetCwd(payload), payload.message ? String(payload.message) : undefined, payload.repoRoot)
+    return { ok: true }
+  },
+  'git.stash-pop': async (payload) => {
+    await git.stashPop(targetCwd(payload), typeof payload.index === 'number' ? payload.index : undefined, payload.repoRoot)
+    return { ok: true }
+  },
+  'git.stash-list': async (payload) => {
+    return { entries: await git.stashList(targetCwd(payload), payload.repoRoot) }
+  },
+  'git.apply-patch': async (payload) => {
+    await git.applyPatch(targetCwd(payload), String(payload.patch || ''), payload.reverse === true, payload.repoRoot)
+    return { ok: true }
+  },
 }
 
 export function apply(ctx: Context): void {
